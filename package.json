@@ -1,0 +1,17 @@
+{
+  "name": "wallet-rescue",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@nktkas/hyperliquid": "^0.32.2",
+    "viem": "^2.49.0"
+  }
+}

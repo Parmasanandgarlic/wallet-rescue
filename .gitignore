@@ -1,2 +1,11 @@
 node_modules/
 *.txt
+
+# Runtime secrets and local credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key

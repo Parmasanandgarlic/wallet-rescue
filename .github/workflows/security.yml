@@ -1,0 +1,25 @@
+name: Security Gates
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: Reject literal private keys and credential files
+        run: node security-audit.mjs
+      - name: Reject high-severity production dependency advisories
+        run: npm audit --omit=dev --audit-level=high

@@ -5,17 +5,16 @@ import { createWalletClient, http, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon } from 'viem/chains';
 import { requireCompromisedKey } from './key-config.mjs';
+import { requireLiveExecution } from './safety.mjs';
 
 const account = privateKeyToAccount(requireCompromisedKey());
 
 async function revokeOnPolygon() {
+  requireLiveExecution({ address: account.address });
   try {
     console.log(`Account: ${account.address}`);
     const walletClient = createWalletClient({ account, chain: polygon, transport: http() });
-    const authorization = await walletClient.signAuthorization({
-      contractAddress: zeroAddress,
-      executor: 'self',
-    });
+    const authorization = await walletClient.signAuthorization({ contractAddress: zeroAddress, executor: 'self' });
     const txHash = await walletClient.sendTransaction({
       to: account.address,
       authorizationList: [authorization],

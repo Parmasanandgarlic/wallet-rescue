@@ -1,4 +1,4 @@
-function normalizePrivateKey(value, name) {
+export function normalizePrivateKey(value, name = 'PRIVATE_KEY') {
   const raw = String(value || '').trim();
   const normalized = raw.startsWith('0x') ? raw : `0x${raw}`;
   if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) {

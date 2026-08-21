@@ -1,4 +1,4 @@
-name: Security Gates
+name: Security and Quality Gates
 
 on:
   pull_request:
@@ -19,7 +19,11 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
+      - name: Syntax checks
+        run: npm run check
+      - name: Unit tests
+        run: npm test
       - name: Reject literal private keys and credential files
-        run: node security-audit.mjs
+        run: npm run audit
       - name: Reject high-severity production dependency advisories
         run: npm audit --omit=dev --audit-level=high

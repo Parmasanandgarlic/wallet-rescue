@@ -6,7 +6,7 @@ It is not a consumer wallet and it is not a one-click recovery product. The repo
 
 ## What this repository covers
 
-- **EIP-7702 delegation revocation** across several EVM chains.
+- **Verified EIP-7702 delegation revocation** across several EVM chains.
 - **Sponsored revocation** where a separate clean wallet pays gas for the compromised signer.
 - **ERC-20 approval discovery and revocation** on Polygon.
 - **Hyperliquid account diagnostics** including balances, positions, agents and multi-sig state.
@@ -27,7 +27,7 @@ These do not intentionally broadcast state-changing transactions:
 
 ### State-changing tools
 
-Every state-changing recovery script now shares the same two-part execution gate:
+Every state-changing recovery script shares the same two-part execution gate:
 
 1. the command must include `--execute`; and
 2. `EXPECTED_WALLET` must be set and match the address derived from `COMPROMISED_PRIVATE_KEY`.
@@ -35,6 +35,16 @@ Every state-changing recovery script now shares the same two-part execution gate
 If either condition is absent, the process stops **before broadcasting**.
 
 This protects against the most dangerous operator error in a rescue environment: running an old command with the wrong key, wrong terminal environment or wrong target wallet.
+
+For EIP-7702 revocation, transaction submission is **not** the success criterion. The revocation paths additionally:
+
+1. read account code before mutation;
+2. confirm it is an EIP-7702 delegation designator rather than unrelated contract/account code;
+3. submit the revocation only after that preflight passes;
+4. wait for a successful transaction receipt; and
+5. read account code again and fail unless the delegation is actually cleared.
+
+Chains with no current delegation are skipped without mutation. Unexpected account code fails closed for manual review.
 
 ## Setup
 
@@ -103,21 +113,23 @@ The same gate applies to the phase-specific, approval-revocation, sponsored and 
 
 ## EIP-7702 utilities
 
+EIP-7702 delegated accounts expose a delegation designator in account code. The revocation utilities parse that state before broadcasting and verify the postcondition after confirmation rather than assuming a returned transaction hash means recovery succeeded.
+
 ### `revoke-eip7702.mjs`
 
-Attempts to replace delegation with `zeroAddress` across Ethereum, BNB Smart Chain, Base, Arbitrum, Optimism and Berachain.
+Primary multi-chain revocation path for Ethereum, BNB Smart Chain, Base, Arbitrum, Optimism and Berachain. It preflights delegation state, submits the zero-address authorization, waits for a receipt, and verifies account code afterward.
 
 ### `phase1-safe-chains.mjs`
 
-A chain-by-chain self-funded revocation path where the compromised wallet can still pay gas.
+Chain-by-chain self-funded revocation where the compromised wallet can still pay gas. It follows the same preflight/receipt/post-state invariant as the primary path.
 
 ### `phase2-polygon-race.mjs`
 
-A Polygon-specific revocation path retained for incident timing/race scenarios.
+A Polygon-specific revocation path retained for incident timing/race scenarios. It remains separately armed by the shared live-execution gate.
 
 ### `sponsored-rescue.mjs`
 
-Uses the compromised account only to sign the EIP-7702 authorization while a separate clean account submits/pays for the transaction. It includes RPC fallback and timeout handling.
+Uses the compromised account only to sign the EIP-7702 authorization while a separate clean account submits/pays for the transaction. It includes RPC fallback and timeout handling plus the same delegation preflight and post-state verification used by the direct paths.
 
 ## Approval cleanup
 
@@ -152,7 +164,7 @@ npm run audit
 npm audit --omit=dev --audit-level=high
 ```
 
-CI runs these checks on pushes and pull requests. Unit tests specifically exercise private-key validation and the live-execution safety gate without using real keys or broadcasting transactions.
+CI runs these checks on pushes and pull requests. Unit tests exercise private-key validation, the live-execution safety gate, EIP-7702 delegation parsing and the postcondition verifier without using real keys or broadcasting transactions.
 
 ## Threat model and limitations
 
@@ -162,6 +174,7 @@ This toolkit assumes:
 - the compromised private key may already be known to an attacker;
 - a sweeper may race transactions;
 - network/RPC/API availability can be unreliable during response;
+- a single confirmation is an operational default, not protection against every possible reorganization scenario;
 - revoking one delegation or approval does not prove the account is globally safe;
 - downstream protocols may maintain their own authorization state independent of the EVM account's delegation.
 

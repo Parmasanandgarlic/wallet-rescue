@@ -1,11 +1,12 @@
 // sponsored-rescue.mjs
 // Sponsored EIP-7702 revocation. Both signing keys are runtime-only.
 
-import { createWalletClient, http, defineChain, zeroAddress } from 'viem';
+import { createPublicClient, createWalletClient, http, defineChain, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, bsc, base, arbitrum, polygon } from 'viem/chains';
 import { requireCompromisedKey, requireRescueKey } from './key-config.mjs';
 import { requireLiveExecution } from './safety.mjs';
+import { assertDelegationCleared, parseDelegationCode } from './delegation.mjs';
 
 const compromisedAccount = privateKeyToAccount(requireCompromisedKey());
 const cleanAccount = privateKeyToAccount(requireRescueKey());
@@ -39,8 +40,22 @@ async function sponsoredRevokeOnChain({ chain, label, explorer, rpcs }) {
     const rpc = rpcs[i];
     try {
       const transport = http(rpc, { timeout: 30_000 });
+      const publicClient = createPublicClient({ chain, transport });
       const compromisedClient = createWalletClient({ account: compromisedAccount, chain, transport });
       const cleanClient = createWalletClient({ account: cleanAccount, chain, transport });
+
+      const before = parseDelegationCode(await withTimeout(
+        publicClient.getCode({ address: compromisedAccount.address }),
+        20_000,
+      ));
+      if (before.kind === 'empty') {
+        console.log(`SKIP ${label}: account has no EIP-7702 delegation.`);
+        return { chain: label, success: true, skipped: true, reason: 'no-delegation' };
+      }
+      if (before.kind !== 'delegated') {
+        throw new Error('Account code is not an EIP-7702 delegation designator; refusing sponsored mutation.');
+      }
+
       const authorization = await withTimeout(
         compromisedClient.signAuthorization({ contractAddress: zeroAddress }),
         20_000,
@@ -54,6 +69,17 @@ async function sponsoredRevokeOnChain({ chain, label, explorer, rpcs }) {
         }),
         45_000,
       );
+      const receipt = await withTimeout(
+        publicClient.waitForTransactionReceipt({ hash: txHash, confirmations: 1 }),
+        90_000,
+      );
+      if (receipt.status !== 'success') throw new Error(`Revocation transaction reverted: ${txHash}`);
+
+      const afterCode = await withTimeout(
+        publicClient.getCode({ address: compromisedAccount.address }),
+        20_000,
+      );
+      assertDelegationCleared(afterCode, label);
       console.log(`SUCCESS ${label}: ${explorer}${txHash}`);
       return { chain: label, success: true, txHash };
     } catch (error) {
@@ -70,7 +96,9 @@ async function main() {
   console.log(`Rescue gas payer: ${cleanAccount.address}`);
   const results = [];
   for (const entry of chains) results.push(await sponsoredRevokeOnChain(entry));
-  for (const result of results) console.log(`${result.success ? 'OK' : 'FAIL'} ${result.chain}: ${result.txHash || result.error}`);
+  for (const result of results) {
+    console.log(`${result.success ? 'OK' : 'FAIL'} ${result.chain}: ${result.txHash || result.reason || result.error}`);
+  }
   if (results.some((result) => !result.success)) process.exitCode = 1;
 }
 

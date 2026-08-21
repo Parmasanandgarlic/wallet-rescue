@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check key-config.mjs && node --check safety.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs && node --check hl-action-probe.mjs && node --check hl-force-multisig-removal.mjs && node --check hl-final-attempt.mjs",
+    "check": "node --check key-config.mjs && node --check safety.mjs && node --check delegation.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs && node --check hl-action-probe.mjs && node --check hl-force-multisig-removal.mjs && node --check hl-final-attempt.mjs",
     "audit": "node security-audit.mjs"
   },
   "keywords": [

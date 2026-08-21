@@ -1,15 +1,25 @@
 {
   "name": "wallet-rescue",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "1.1.0",
+  "description": "Defensive EVM incident-response toolkit for EIP-7702 compromise, approval cleanup, evidence collection, and Hyperliquid lockout diagnostics.",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check key-config.mjs && node --check safety.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs && node --check hl-action-probe.mjs && node --check hl-force-multisig-removal.mjs && node --check hl-final-attempt.mjs",
+    "audit": "node security-audit.mjs"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "eip-7702",
+    "incident-response",
+    "wallet-security",
+    "evm",
+    "hyperliquid"
+  ],
   "license": "ISC",
-  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.32.2",
     "viem": "^2.49.0"

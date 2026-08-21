@@ -1,62 +1,58 @@
 // hl-final-attempt.mjs
-// Final Hyperliquid remediation attempts. Wallet key is runtime-only.
+// Historical experimental Hyperliquid remediation variants. STATE-CHANGING.
 
 import { ExchangeClient, HttpTransport } from '@nktkas/hyperliquid';
 import { privateKeyToAccount } from 'viem/accounts';
 import { requireCompromisedKey } from './key-config.mjs';
+import { requireLiveExecution } from './safety.mjs';
 
 const account = privateKeyToAccount(requireCompromisedKey());
 const transport = new HttpTransport({ url: 'https://api.hyperliquid.xyz' });
 const exchange = new ExchangeClient({ transport, wallet: account });
 
 async function main() {
-  console.log(`Wallet: ${account.address}\n`);
+  requireLiveExecution({ address: account.address });
+  console.warn(`Experimental Hyperliquid remediation enabled for ${account.address}.`);
 
   console.log('Attempt 1: convertToMultiSigUser({ signers: [], threshold: 0 })');
   try {
-    const r = await exchange.convertToMultiSigUser({ signers: [], threshold: 0 });
-    console.log('SUCCESS:', JSON.stringify(r));
+    const result = await exchange.convertToMultiSigUser({ signers: [], threshold: 0 });
+    console.log('SUCCESS:', JSON.stringify(result));
     return;
-  } catch (e) {
-    console.log('FAILED:', e.message);
+  } catch (error) {
+    console.log('FAILED:', error.message);
   }
 
   console.log('\nAttempt 2: self signer, threshold 1');
   try {
-    const r = await exchange.convertToMultiSigUser({
-      signers: [{ address: account.address }],
-      threshold: 1,
-    });
-    console.log('SUCCESS:', JSON.stringify(r));
+    const result = await exchange.convertToMultiSigUser({ signers: [{ address: account.address }], threshold: 1 });
+    console.log('SUCCESS:', JSON.stringify(result));
     return;
-  } catch (e) {
-    console.log('FAILED:', e.message);
+  } catch (error) {
+    console.log('FAILED:', error.message);
   }
 
   console.log('\nAttempt 3: signer as address string');
   try {
-    const r = await exchange.convertToMultiSigUser({
-      signers: [account.address],
-      threshold: 1,
-    });
-    console.log('SUCCESS:', JSON.stringify(r));
+    const result = await exchange.convertToMultiSigUser({ signers: [account.address], threshold: 1 });
+    console.log('SUCCESS:', JSON.stringify(result));
     return;
-  } catch (e) {
-    console.log('FAILED:', e.message);
+  } catch (error) {
+    console.log('FAILED:', error.message);
   }
 
   console.log('\nAttempt 4: cSignerAction variants');
   for (const type of ['convertToMultiSigUser', 'removeMultiSig', 'removeSigner', 'revokeMultiSig', 'resetMultiSig']) {
     try {
-      const r = await exchange.cSignerAction({ type, signers: [], threshold: 0 });
-      console.log(`SUCCESS ${type}:`, JSON.stringify(r));
+      const result = await exchange.cSignerAction({ type, signers: [], threshold: 0 });
+      console.log(`SUCCESS ${type}:`, JSON.stringify(result));
       return;
-    } catch (e) {
-      console.log(`FAILED ${type}: ${e.message?.slice(0, 100)}`);
+    } catch (error) {
+      console.log(`FAILED ${type}: ${error.message?.slice(0, 100)}`);
     }
   }
 
-  console.log('\nAll code-level attempts exhausted. Hyperliquid support is the remaining path.');
+  console.log('\nAll code-level attempts exhausted. Hyperliquid support is the remaining preferred path.');
 }
 
 main().catch((error) => {

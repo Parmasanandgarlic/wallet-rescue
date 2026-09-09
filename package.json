@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check key-config.mjs && node --check safety.mjs && node --check delegation.mjs && node --check chains.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check phase1-safe-chains.mjs && node --check phase2-polygon-race.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs",
+    "check": "node --check key-config.mjs && node --check safety.mjs && node --check delegation.mjs && node --check chains.mjs && node --check retry-policy.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check phase1-safe-chains.mjs && node --check phase2-polygon-race.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs",
     "audit": "node security-audit.mjs",
     "inspect:eip7702": "node revoke-eip7702.mjs",
     "inspect:sponsored": "node sponsored-rescue.mjs"

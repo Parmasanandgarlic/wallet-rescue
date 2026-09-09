@@ -6,35 +6,47 @@ It is not a consumer wallet and it is not a one-click recovery product. The repo
 
 ## What this repository covers
 
-- **Verified EIP-7702 delegation revocation** across several EVM chains.
+- **Read-only EIP-7702 inspection by default** across supported EVM chains without loading the compromised private key.
+- **Verified EIP-7702 delegation revocation** with explicit execution and chain-scope gates.
 - **Sponsored revocation** where a separate clean wallet pays gas for the compromised signer.
 - **ERC-20 approval discovery and revocation** on Polygon.
 - **Hyperliquid account diagnostics** including balances, positions, agents and multi-sig state.
 - **Evidence packaging** for support/escalation with a signed wallet-ownership statement.
-- **Experimental Hyperliquid remediation probes** retained as incident research, clearly separated from read-only diagnostics.
+- Historical Hyperliquid write research documented separately from the supported operator surface.
 
 ## Safety model
 
 The most important engineering property in this repository is the distinction between **inspection** and **execution**.
 
-### Read-only / evidence tools
+### Primary EIP-7702 tools default to inspection
 
-These do not intentionally broadcast state-changing transactions:
+`revoke-eip7702.mjs` and `sponsored-rescue.mjs` use `EXPECTED_WALLET` as the public inspection target. Without `--execute`, they read account code, report delegation state and exit without loading `COMPROMISED_PRIVATE_KEY` or broadcasting a transaction.
 
-- `hl-check-multisig.mjs` — inspect Hyperliquid account, balances, agents and multi-sig state.
-- `hl-evidence-package.mjs` — collect account evidence and sign an ownership statement for support/escalation.
-- `security-audit.mjs` — scan the checkout for private-key / credential mistakes.
+```bash
+EXPECTED_WALLET=0x... node revoke-eip7702.mjs
+```
 
-### State-changing tools
+Inspection defaults to the complete supported registry and can be narrowed:
 
-Every state-changing recovery script shares the same two-part execution gate:
+```bash
+EXPECTED_WALLET=0x... node revoke-eip7702.mjs --chains=ethereum,base
+```
 
-1. the command must include `--execute`; and
-2. `EXPECTED_WALLET` must be set and match the address derived from `COMPROMISED_PRIVATE_KEY`.
+Supported chain keys are:
 
-If either condition is absent, the process stops **before broadcasting**.
+```text
+ethereum, bsc, polygon, base, arbitrum, optimism, berachain
+```
 
-This protects against the most dangerous operator error in a rescue environment: running an old command with the wrong key, wrong terminal environment or wrong target wallet.
+### Live mutation requires three independent decisions
+
+Primary multi-chain EIP-7702 mutation requires:
+
+1. the command includes `--execute`;
+2. `EXPECTED_WALLET` matches the address derived from `COMPROMISED_PRIVATE_KEY`; and
+3. the operator supplies explicit `--chains=<chain[,chain...]>` scope.
+
+Presence of a private key alone never authorizes a transaction. Unknown chain names fail closed.
 
 For EIP-7702 revocation, transaction submission is **not** the success criterion. The revocation paths additionally:
 
@@ -45,6 +57,16 @@ For EIP-7702 revocation, transaction submission is **not** the success criterion
 5. read account code again and fail unless the delegation is actually cleared.
 
 Chains with no current delegation are skipped without mutation. Unexpected account code fails closed for manual review.
+
+### Read-only / evidence tools
+
+These do not intentionally broadcast state-changing transactions:
+
+- `revoke-eip7702.mjs` without `--execute` — inspect EIP-7702 account code.
+- `sponsored-rescue.mjs` without `--execute` — inspect the same state using RPC fallback.
+- `hl-check-multisig.mjs` — inspect Hyperliquid account, balances, agents and multi-sig state.
+- `hl-evidence-package.mjs` — collect account evidence and sign an ownership statement for support/escalation.
+- `security-audit.mjs` — scan the checkout for private-key / credential mistakes.
 
 ## Setup
 
@@ -59,11 +81,16 @@ cp .env.example .env
 
 Do not commit `.env` or paste private keys into source files, shell history, issues or logs.
 
-Required runtime values depend on the operation:
+For inspection, only the public target address is required:
+
+```env
+EXPECTED_WALLET=<address you have independently verified>
+```
+
+Live operations additionally load runtime-only signing keys:
 
 ```env
 COMPROMISED_PRIVATE_KEY=<32-byte hex key supplied at runtime>
-EXPECTED_WALLET=<address you have independently verified>
 
 # Sponsored rescue only
 RESCUE_PRIVATE_KEY=<clean gas-payer key>
@@ -75,7 +102,13 @@ The compromised key is still compromised. Loading it into any process should be 
 
 ### 1. Establish the facts first
 
-Before broadcasting anything, preserve evidence and understand the control state.
+Preserve evidence and inspect control state before broadcasting anything.
+
+For EIP-7702:
+
+```bash
+EXPECTED_WALLET=0x... npm run inspect:eip7702
+```
 
 For Hyperliquid:
 
@@ -89,53 +122,60 @@ If escalation evidence is required:
 COMPROMISED_PRIVATE_KEY=... node hl-evidence-package.mjs
 ```
 
-Review the resulting addresses, active agents, balances, multi-sig configuration and recent activity before moving to remediation.
+Review addresses, active agents, balances, multi-sig configuration and recent activity before moving to remediation.
 
-### 2. Verify the exact target wallet
+### 2. Verify the exact target wallet independently
 
-Set `EXPECTED_WALLET` from an independently verified source—not by copying an address emitted by the same script you are about to run.
+Set `EXPECTED_WALLET` from an independently verified source—not by copying an address emitted by the same signing path you are about to run.
 
 ```bash
 export EXPECTED_WALLET=0x...
 ```
 
-### 3. Arm only the remediation you intend
+### 3. Select only the chains you intend to mutate
 
-For example, an EIP-7702 delegation revocation is deliberately inert without `--execute`:
+Read-only inspection may cover all supported chains. Live mutation does not: you must explicitly name the chain scope.
 
 ```bash
 COMPROMISED_PRIVATE_KEY=... \
 EXPECTED_WALLET=0x... \
-node revoke-eip7702.mjs --execute
+node revoke-eip7702.mjs --execute --chains=base,arbitrum
 ```
 
-The same gate applies to the phase-specific, approval-revocation, sponsored and experimental Hyperliquid write utilities.
+Sponsored recovery uses the same target and chain gates plus a clean gas-payer key:
+
+```bash
+COMPROMISED_PRIVATE_KEY=... \
+RESCUE_PRIVATE_KEY=... \
+EXPECTED_WALLET=0x... \
+node sponsored-rescue.mjs --execute --chains=base
+```
 
 ## EIP-7702 utilities
 
-EIP-7702 delegated accounts expose a delegation designator in account code. The revocation utilities parse that state before broadcasting and verify the postcondition after confirmation rather than assuming a returned transaction hash means recovery succeeded.
+EIP-7702 delegated accounts expose a delegation designator in account code. The primary revocation utilities parse that state before broadcasting and verify the postcondition after confirmation rather than assuming a returned transaction hash means recovery succeeded.
 
 ### `revoke-eip7702.mjs`
 
-Primary multi-chain revocation path for Ethereum, BNB Smart Chain, Base, Arbitrum, Optimism and Berachain. It preflights delegation state, submits the zero-address authorization, waits for a receipt, and verifies account code afterward.
+Primary direct/self-funded path. It defaults to read-only inspection. Live mode requires `--execute`, signer/`EXPECTED_WALLET` agreement and explicit `--chains` scope.
+
+### `sponsored-rescue.mjs`
+
+Uses the compromised account only to sign the EIP-7702 authorization while a separate clean account submits/pays for the transaction. It defaults to read-only inspection, includes bounded RPC fallback and timeout handling, and applies the same preflight/receipt/post-state verification in live mode.
 
 ### `phase1-safe-chains.mjs`
 
-Chain-by-chain self-funded revocation where the compromised wallet can still pay gas. It follows the same preflight/receipt/post-state invariant as the primary path.
+Earlier chain-by-chain self-funded revocation retained as an incident-specific utility. It uses the shared live-execution gate but is not the preferred multi-chain operator entry point.
 
 ### `phase2-polygon-race.mjs`
 
 A Polygon-specific revocation path retained for incident timing/race scenarios. It remains separately armed by the shared live-execution gate.
 
-### `sponsored-rescue.mjs`
-
-Uses the compromised account only to sign the EIP-7702 authorization while a separate clean account submits/pays for the transaction. It includes RPC fallback and timeout handling plus the same delegation preflight and post-state verification used by the direct paths.
-
 ## Approval cleanup
 
 `revoke-approvals-polygon.mjs` discovers historical `Approval` events, checks the current on-chain allowance for each token/spender pair, and writes `approve(spender, 0)` only where a non-zero allowance remains.
 
-A previous version silently substituted a hardcoded common-token list when discovery failed. The portfolio version is intentionally stricter: discovery failure aborts by default. The historical common-token fallback is available only when you explicitly add:
+Discovery failure aborts by default. The historical common-token fallback is available only when explicitly requested:
 
 ```bash
 --include-common-fallbacks
@@ -145,15 +185,14 @@ That keeps external API failure from silently changing the scope of a live incid
 
 ## Hyperliquid utilities
 
-Hyperliquid account-control recovery can be protocol-specific. Treat the read-only diagnostic path as authoritative and prefer the platform's supported recovery/support process when account ownership or multi-sig control has been altered.
+Hyperliquid account-control recovery is protocol-specific. The supported active surface is deliberately conservative:
 
 - `hl-check-multisig.mjs` — **read-only** inspection.
 - `hl-evidence-package.mjs` — evidence/support package.
-- `hl-action-probe.mjs` — **experimental and state-changing** historical action probes; renamed from the misleading `hl-remove-multisig.mjs`.
-- `hl-force-multisig-removal.mjs` — **experimental and state-changing** variants.
-- `hl-final-attempt.mjs` — **experimental and state-changing** historical variants.
 
-The experimental files are retained because they document the investigation path, not because they are recommended as a generic Hyperliquid recovery procedure.
+Earlier state-changing Hyperliquid probes are not shipped in the current working tree because they were speculative incident research rather than a general recovery method. Their status is documented in [`research/hyperliquid/README.md`](research/hyperliquid/README.md); historical source remains auditable in Git history.
+
+Prefer Hyperliquid's documented recovery/support process when account ownership, agents or multi-sig control has been altered.
 
 ## Verification
 
@@ -164,22 +203,22 @@ npm run audit
 npm audit --omit=dev --audit-level=high
 ```
 
-CI runs these checks on pushes and pull requests. Unit tests exercise private-key validation, the live-execution safety gate, EIP-7702 delegation parsing and the postcondition verifier without using real keys or broadcasting transactions.
+CI runs these checks on pushes and pull requests. Unit tests exercise private-key validation, operator inspection mode, the live-execution gate, explicit chain selection, EIP-7702 delegation parsing and the postcondition verifier without using real keys or broadcasting transactions.
 
-## Threat model and limitations
+## Threat model and operator runbook
 
-This toolkit assumes:
+- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — assets, attacker/operator threats, invariants and limitations.
+- [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md) — guarded incident-response sequence and command examples.
+- [`SECURITY.md`](SECURITY.md) — vulnerability reporting and secret-handling policy.
 
-- you are responding to a wallet you own or are explicitly authorized to recover;
-- the compromised private key may already be known to an attacker;
-- a sweeper may race transactions;
-- network/RPC/API availability can be unreliable during response;
-- a single confirmation is an operational default, not protection against every possible reorganization scenario;
-- revoking one delegation or approval does not prove the account is globally safe;
-- downstream protocols may maintain their own authorization state independent of the EVM account's delegation.
+This toolkit assumes the compromised private key may already be known to an attacker, a sweeper may race transactions, RPC/API availability can be unreliable, and downstream protocols may maintain authorization state independent of EVM delegation. Revoking one delegation or approval does not prove the account is globally safe.
 
-After successful asset/control recovery, migrate to a clean account and rotate or revoke any related credentials. Do not return a known-compromised private key to normal operational use.
+After successful asset/control recovery, migrate to a clean account and rotate or revoke related credentials. Do not return a known-compromised private key to normal operational use.
 
 ## Responsible use
 
 This repository is for defensive incident response on accounts you control or are authorized to assist. It does not provide a mechanism for bypassing ownership or authorization of third-party accounts.
+
+## License
+
+ISC. See [`LICENSE`](LICENSE).

@@ -7,6 +7,7 @@ import { requireCompromisedKey, requireRescueKey } from './key-config.mjs';
 import { operatorStatus, requireLiveExecution } from './safety.mjs';
 import { assertDelegationCleared, parseDelegationCode } from './delegation.mjs';
 import { selectChainsFromArgs } from './chains.mjs';
+import { mayRetryRpcFailure } from './retry-policy.mjs';
 
 const args = process.argv.slice(2);
 
@@ -47,6 +48,9 @@ async function inspectOnChain(entry, address) {
 async function sponsoredRevokeOnChain(entry, compromisedAccount, cleanAccount) {
   for (let i = 0; i < entry.rpcs.length; i++) {
     const rpc = entry.rpcs[i];
+    let broadcastAttempted = false;
+    let txHash;
+
     try {
       const transport = http(rpc, { timeout: 30_000 });
       const publicClient = createPublicClient({ chain: entry.chain, transport });
@@ -69,7 +73,12 @@ async function sponsoredRevokeOnChain(entry, compromisedAccount, cleanAccount) {
         compromisedClient.signAuthorization({ contractAddress: zeroAddress }),
         20_000,
       );
-      const txHash = await withTimeout(
+
+      // Once submission begins, a timeout or RPC disconnect is ambiguous: the
+      // transaction may already be in the mempool. Never retry on another RPC
+      // from this process, because that could create a second live mutation.
+      broadcastAttempted = true;
+      txHash = await withTimeout(
         cleanClient.sendTransaction({
           to: compromisedAccount.address,
           authorizationList: [authorization],
@@ -94,9 +103,31 @@ async function sponsoredRevokeOnChain(entry, compromisedAccount, cleanAccount) {
     } catch (error) {
       const message = error.shortMessage || error.message;
       console.error(`RPC ${i + 1}/${entry.rpcs.length} failed on ${entry.label}: ${message}`);
-      if (i === entry.rpcs.length - 1) return { chain: entry.label, success: false, error: message };
+
+      if (mayRetryRpcFailure({
+        broadcastAttempted,
+        attemptIndex: i,
+        totalAttempts: entry.rpcs.length,
+      })) {
+        continue;
+      }
+
+      if (broadcastAttempted) {
+        const suffix = txHash ? ` Transaction: ${txHash}.` : '';
+        return {
+          chain: entry.label,
+          success: false,
+          txHash,
+          ambiguous: true,
+          error: `Broadcast was attempted; automatic retry is disabled.${suffix} Verify chain state manually before any further mutation. ${message}`,
+        };
+      }
+
+      return { chain: entry.label, success: false, error: message };
     }
   }
+
+  return { chain: entry.label, success: false, error: 'No RPC attempt completed.' };
 }
 
 async function main() {

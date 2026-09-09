@@ -1,32 +1,14 @@
 // sponsored-rescue.mjs
-// Sponsored EIP-7702 revocation. Both signing keys are runtime-only.
+// Sponsored EIP-7702 revocation. Signing keys are loaded only for explicit live execution.
 
-import { createPublicClient, createWalletClient, http, defineChain, zeroAddress } from 'viem';
+import { createPublicClient, createWalletClient, http, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { mainnet, bsc, base, arbitrum, polygon } from 'viem/chains';
 import { requireCompromisedKey, requireRescueKey } from './key-config.mjs';
-import { requireLiveExecution } from './safety.mjs';
+import { operatorStatus, requireLiveExecution } from './safety.mjs';
 import { assertDelegationCleared, parseDelegationCode } from './delegation.mjs';
+import { selectChainsFromArgs } from './chains.mjs';
 
-const compromisedAccount = privateKeyToAccount(requireCompromisedKey());
-const cleanAccount = privateKeyToAccount(requireRescueKey());
-
-const berachain = defineChain({
-  id: 80094,
-  name: 'Berachain',
-  nativeCurrency: { name: 'BERA', symbol: 'BERA', decimals: 18 },
-  rpcUrls: { default: { http: ['https://rpc.berachain.com'] } },
-  blockExplorers: { default: { name: 'Berascan', url: 'https://berascan.com' } },
-});
-
-const chains = [
-  { chain: mainnet, label: 'Ethereum Mainnet', explorer: 'https://etherscan.io/tx/', rpcs: ['https://rpc.ankr.com/eth', 'https://ethereum-rpc.publicnode.com', 'https://1rpc.io/eth'] },
-  { chain: bsc, label: 'BNB Smart Chain', explorer: 'https://bscscan.com/tx/', rpcs: ['https://rpc.ankr.com/bsc', 'https://bsc-rpc.publicnode.com', 'https://bsc-dataseed2.binance.org'] },
-  { chain: polygon, label: 'Polygon', explorer: 'https://polygonscan.com/tx/', rpcs: ['https://rpc.ankr.com/polygon', 'https://polygon-bor-rpc.publicnode.com', 'https://1rpc.io/matic'] },
-  { chain: base, label: 'Base', explorer: 'https://basescan.org/tx/', rpcs: ['https://rpc.ankr.com/base', 'https://base-rpc.publicnode.com', 'https://mainnet.base.org'] },
-  { chain: arbitrum, label: 'Arbitrum One', explorer: 'https://arbiscan.io/tx/', rpcs: ['https://rpc.ankr.com/arbitrum', 'https://arbitrum-one-rpc.publicnode.com', 'https://arb1.arbitrum.io/rpc'] },
-  { chain: berachain, label: 'Berachain', explorer: 'https://berascan.com/tx/', rpcs: ['https://rpc.berachain.com'] },
-];
+const args = process.argv.slice(2);
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -35,22 +17,49 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-async function sponsoredRevokeOnChain({ chain, label, explorer, rpcs }) {
-  for (let i = 0; i < rpcs.length; i++) {
-    const rpc = rpcs[i];
+async function inspectOnChain(entry, address) {
+  let lastError;
+  for (const rpc of entry.rpcs) {
+    try {
+      const publicClient = createPublicClient({
+        chain: entry.chain,
+        transport: http(rpc, { timeout: 30_000 }),
+      });
+      const code = await withTimeout(publicClient.getCode({ address }), 20_000);
+      const state = parseDelegationCode(code);
+      if (state.kind === 'empty') {
+        console.log(`CLEAR ${entry.label}: no account code/delegation.`);
+        return { chain: entry.label, state: 'clear' };
+      }
+      if (state.kind === 'delegated') {
+        console.log(`DELEGATED ${entry.label}: ${state.delegate}`);
+        return { chain: entry.label, state: 'delegated', delegate: state.delegate };
+      }
+      console.log(`REVIEW ${entry.label}: unexpected account code (${state.kind}).`);
+      return { chain: entry.label, state: state.kind };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error(`No RPC endpoint available for ${entry.label}.`);
+}
+
+async function sponsoredRevokeOnChain(entry, compromisedAccount, cleanAccount) {
+  for (let i = 0; i < entry.rpcs.length; i++) {
+    const rpc = entry.rpcs[i];
     try {
       const transport = http(rpc, { timeout: 30_000 });
-      const publicClient = createPublicClient({ chain, transport });
-      const compromisedClient = createWalletClient({ account: compromisedAccount, chain, transport });
-      const cleanClient = createWalletClient({ account: cleanAccount, chain, transport });
+      const publicClient = createPublicClient({ chain: entry.chain, transport });
+      const compromisedClient = createWalletClient({ account: compromisedAccount, chain: entry.chain, transport });
+      const cleanClient = createWalletClient({ account: cleanAccount, chain: entry.chain, transport });
 
       const before = parseDelegationCode(await withTimeout(
         publicClient.getCode({ address: compromisedAccount.address }),
         20_000,
       ));
       if (before.kind === 'empty') {
-        console.log(`SKIP ${label}: account has no EIP-7702 delegation.`);
-        return { chain: label, success: true, skipped: true, reason: 'no-delegation' };
+        console.log(`SKIP ${entry.label}: account has no EIP-7702 delegation.`);
+        return { chain: entry.label, success: true, skipped: true, reason: 'no-delegation' };
       }
       if (before.kind !== 'delegated') {
         throw new Error('Account code is not an EIP-7702 delegation designator; refusing sponsored mutation.');
@@ -79,23 +88,52 @@ async function sponsoredRevokeOnChain({ chain, label, explorer, rpcs }) {
         publicClient.getCode({ address: compromisedAccount.address }),
         20_000,
       );
-      assertDelegationCleared(afterCode, label);
-      console.log(`SUCCESS ${label}: ${explorer}${txHash}`);
-      return { chain: label, success: true, txHash };
+      assertDelegationCleared(afterCode, entry.label);
+      console.log(`SUCCESS ${entry.label}: ${entry.explorer}${txHash}`);
+      return { chain: entry.label, success: true, txHash };
     } catch (error) {
       const message = error.shortMessage || error.message;
-      console.error(`RPC ${i + 1}/${rpcs.length} failed on ${label}: ${message}`);
-      if (i === rpcs.length - 1) return { chain: label, success: false, error: message };
+      console.error(`RPC ${i + 1}/${entry.rpcs.length} failed on ${entry.label}: ${message}`);
+      if (i === entry.rpcs.length - 1) return { chain: entry.label, success: false, error: message };
     }
   }
 }
 
 async function main() {
-  requireLiveExecution({ address: compromisedAccount.address });
+  const operator = operatorStatus({ args });
+  if (!operator.ok) throw new Error(`${operator.reason} No transaction was broadcast.`);
+
+  const selectedChains = selectChainsFromArgs(args, {
+    requireExplicit: operator.mode === 'execute',
+  });
+
+  if (operator.mode === 'inspect') {
+    console.log(`Read-only EIP-7702 inspection for: ${operator.address}`);
+    const results = [];
+    for (const entry of selectedChains) {
+      try {
+        results.push(await inspectOnChain(entry, operator.address));
+      } catch (error) {
+        const message = error.shortMessage || error.message;
+        console.error(`FAIL ${entry.label}: ${message}`);
+        results.push({ chain: entry.label, state: 'error', error: message });
+      }
+    }
+    if (results.some((result) => result.state === 'error')) process.exitCode = 1;
+    console.log('Inspection complete. No transaction was broadcast and no private key was loaded.');
+    return;
+  }
+
+  const compromisedAccount = privateKeyToAccount(requireCompromisedKey());
+  const cleanAccount = privateKeyToAccount(requireRescueKey());
+  requireLiveExecution({ address: compromisedAccount.address, args });
+
   console.log(`Compromised wallet: ${compromisedAccount.address}`);
   console.log(`Rescue gas payer: ${cleanAccount.address}`);
   const results = [];
-  for (const entry of chains) results.push(await sponsoredRevokeOnChain(entry));
+  for (const entry of selectedChains) {
+    results.push(await sponsoredRevokeOnChain(entry, compromisedAccount, cleanAccount));
+  }
   for (const result of results) {
     console.log(`${result.success ? 'OK' : 'FAIL'} ${result.chain}: ${result.txHash || result.reason || result.error}`);
   }

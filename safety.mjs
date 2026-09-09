@@ -1,5 +1,25 @@
 import { getAddress } from 'viem';
 
+export function operatorStatus({
+  args = process.argv.slice(2),
+  expectedWallet = process.env.EXPECTED_WALLET,
+} = {}) {
+  if (!expectedWallet) {
+    return { ok: false, reason: 'EXPECTED_WALLET must identify the wallet being inspected or recovered.' };
+  }
+
+  try {
+    const address = getAddress(expectedWallet);
+    return {
+      ok: true,
+      mode: args.includes('--execute') ? 'execute' : 'inspect',
+      address,
+    };
+  } catch {
+    return { ok: false, reason: 'EXPECTED_WALLET must be a valid EVM address.' };
+  }
+}
+
 export function executionStatus({
   address,
   args = process.argv.slice(2),

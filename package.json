@@ -1,13 +1,15 @@
 {
   "name": "wallet-rescue",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Defensive EVM incident-response toolkit for EIP-7702 compromise, approval cleanup, evidence collection, and Hyperliquid lockout diagnostics.",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check key-config.mjs && node --check safety.mjs && node --check delegation.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs && node --check hl-action-probe.mjs && node --check hl-force-multisig-removal.mjs && node --check hl-final-attempt.mjs",
-    "audit": "node security-audit.mjs"
+    "check": "node --check key-config.mjs && node --check safety.mjs && node --check delegation.mjs && node --check chains.mjs && node --check retry-policy.mjs && node --check revoke-eip7702.mjs && node --check sponsored-rescue.mjs && node --check revoke-approvals-polygon.mjs && node --check phase1-safe-chains.mjs && node --check phase2-polygon-race.mjs && node --check hl-check-multisig.mjs && node --check hl-evidence-package.mjs",
+    "audit": "node security-audit.mjs",
+    "inspect:eip7702": "node revoke-eip7702.mjs",
+    "inspect:sponsored": "node sponsored-rescue.mjs"
   },
   "keywords": [
     "eip-7702",
